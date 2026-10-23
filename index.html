@@ -50,9 +50,9 @@ textarea{resize:vertical;min-height:96px}
 
 /* round table */
 .table-zone{position:relative;width:100%;max-width:420px;aspect-ratio:1;margin:8px auto}
-.table{position:absolute;inset:22%;border-radius:50%;background:radial-gradient(circle at 35% 30%,var(--wood1),var(--wood2));box-shadow:inset 0 0 0 6px rgba(255,255,255,.15),0 10px 30px rgba(90,55,20,.25);display:flex;align-items:center;justify-content:center;flex-direction:column;color:#fff8ec;text-align:center}
+.table{position:absolute;inset:22%;border-radius:50%;background:radial-gradient(circle at 38% 32%,#ffffff 0%,#ffffff 55%,#f4eeea 100%);border:1px solid var(--line);box-shadow:inset 0 0 0 8px #fbf7f5,inset 0 0 0 9px var(--line),0 12px 32px rgba(80,20,35,.14);display:flex;align-items:center;justify-content:center;flex-direction:column;color:var(--accent);text-align:center}
 .table b{font-size:34px;line-height:1}
-.table span{font-size:13px;opacity:.9}
+.table span{font-size:13px;color:var(--muted)}
 .seat{position:absolute;transform:translate(-50%,-50%);background:var(--paper);border:1px solid var(--line);border-radius:999px;padding:6px 12px;font-weight:700;font-size:14px;white-space:nowrap;box-shadow:var(--shadow);max-width:40%;overflow:hidden;text-overflow:ellipsis;animation:pop .3s ease}
 .seat.me{background:var(--accent);color:#fff;border-color:var(--accent)}
 .seat .x{margin-left:6px;border:0;background:none;color:var(--muted);cursor:pointer;padding:0 2px}
@@ -95,6 +95,18 @@ textarea{resize:vertical;min-height:96px}
 .likes{font-weight:800;color:var(--heart);font-size:15px}
 @keyframes rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 
+.ifowner{margin-top:14px;border-radius:20px;padding:28px 22px;background:var(--accent);color:#fff;text-align:center;box-shadow:var(--shadow);animation:rise .4s ease both}
+.ifowner .big{font-size:28px;font-weight:800;letter-spacing:-.03em}
+.wide .ifowner .big{font-size:46px}
+.ifowner .sub{opacity:.85;font-size:14px;margin-top:6px}
+.award-sec{margin-top:18px}
+.award-sec h3{display:flex;gap:10px;align-items:flex-start;font-size:17px;margin:0 0 8px;letter-spacing:-.02em}
+.king{text-align:center;padding:30px 20px;border-radius:20px;background:linear-gradient(160deg,var(--accent),#4f1024);color:#fff;box-shadow:var(--shadow)}
+.king .crown{font-size:46px;line-height:1}
+.king .title{font-size:14px;font-weight:800;letter-spacing:.12em;opacity:.85;margin-top:8px}
+.king .names{font-size:36px;font-weight:800;letter-spacing:-.02em;margin-top:6px}
+.wide .king .names{font-size:56px}
+.king .cnt{opacity:.85;margin-top:4px}
 .counter{font-size:64px;font-weight:800;line-height:1;color:var(--accent)}
 .host-grid{display:grid;grid-template-columns:1fr;gap:16px}
 @media(min-width:900px){.host-grid{grid-template-columns:360px 1fr}}
@@ -2435,7 +2447,25 @@ const MAX_NICK = 12, MAX_AGENDA = 300, MAX_ENTRY = 500;
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const rid = (n=12) => { const a = new Uint8Array(n); crypto.getRandomValues(a); return Array.from(a, b => (b%36).toString(36)).join(''); };
 function shuffle(arr){ const a = arr.slice(); for(let i=a.length-1;i>0;i--){ const r=new Uint32Array(1); crypto.getRandomValues(r); const j=r[0]%(i+1); [a[i],a[j]]=[a[j],a[i]]; } return a; }
-function makeCode(){ const al='ABCDEFGHJKMNPQRSTUVWXYZ23456789'; let s=''; const r=new Uint32Array(4); crypto.getRandomValues(r); r.forEach(v=>s+=al[v%al.length]); return s; }
+function makeCode(){ const r=new Uint32Array(1); crypto.getRandomValues(r); return String(1000 + r[0]%9000); }
+const CODE_RE = /^[0-9]{4}$/;
+const IFOWNER = '내가 어젠더 주인이라면…';
+
+function cardHtml(e, likeBtn){
+  const foot = likeBtn
+    ? `<button class="like" data-like="${esc(e.id)}" aria-pressed="${e.liked}">♥ 공감 ${e.likes||''}</button>`
+    : `<span class="likes">${e.likes?'♥ '+e.likes:''}</span>`;
+  return `<div class="op"><span><span class="tag ${e.kind}">${KINDS[e.kind]}</span></span><div class="t">${esc(e.text)}</div><div class="foot"><span></span>${foot}</div></div>`;
+}
+function heartsHtml(sections){
+  return `<h2>주제별 공감 받은 의견</h2>` + sections.map(s=>`<div class="award-sec"><h3><span class="num">${s.no}</span><span>${esc(s.agenda)}</span></h3>
+    ${s.items.length?`<div class="cards" style="margin-top:6px">${s.items.map(e=>cardHtml(e,false)).join('')}</div>`:`<p class="muted small">공감을 받은 의견이 없어요.</p>`}</div>`).join('');
+}
+function kingHtml(k){
+  return k.likes
+    ? `<div class="king"><div class="crown">👑</div><div class="title">오늘의 공감왕</div><div class="names">${k.names.map(esc).join(' · ')}</div><div class="cnt">받은 공감 ♥ ${k.likes}</div></div>`
+    : `<div class="king"><div class="crown">👑</div><div class="title">오늘의 공감왕</div><div class="cnt mt">오늘은 공감이 하나도 없었어요</div></div>`;
+}
 function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(toast._t); toast._t=setTimeout(()=>t.classList.remove('show'),2200); }
 const store = {
   get(k, sess){ try{ return JSON.parse((sess?sessionStorage:localStorage).getItem(PREFIX+k)); }catch(e){ return null; } },
@@ -2537,18 +2567,32 @@ function runHost(code){
 
   function round(i){ return S.rounds[i] || (S.rounds[i] = {entries:[], revealOrder:[]}); }
   function nicks(){ return S.joinOrder.filter(t=>S.players[t]).map(t=>S.players[t].nick); }
+  function cardsOf(i){ const r = round(i); return r.revealOrder.length ? r.revealOrder.map(id=>r.entries.find(e=>e.id===id)).filter(Boolean) : r.entries; }
+  function heartsData(){
+    return S.order.map((t,i)=>({ no:i+1, agenda:S.players[t]?.agenda || '',
+      items: cardsOf(i).filter(e=>e.likes.length).sort((a,b)=>b.likes.length-a.likes.length).map(e=>({kind:e.kind,text:e.text,likes:e.likes.length})) }));
+  }
+  function kingData(){
+    const tally = {};
+    S.order.forEach((_,i)=>round(i).entries.forEach(e=>{ tally[e.by] = (tally[e.by]||0) + e.likes.length; }));
+    const max = Math.max(0, ...Object.values(tally));
+    const names = max ? Object.keys(tally).filter(t=>tally[t]===max && S.players[t]).map(t=>S.players[t].nick) : [];
+    return { likes:max, names };
+  }
 
   function viewFor(tok){
     const p = S.players[tok];
     const v = { phase:S.phase, joined:!!p, me: p?{nick:p.nick}:null, nicks:nicks(), total:S.order.length || S.joinOrder.length, cur:S.cur };
     if(S.phase!=='lobby') v.agendas = S.order.map(t=>S.players[t] ? S.players[t].agenda : '(나간 참가자)');
-    if(S.phase==='writing' || S.phase==='reveal'){
+    if(S.phase==='writing' || S.phase==='reveal' || S.phase==='ifowner'){
       const r = round(S.cur);
       v.count = r.entries.length;
       v.mine = r.entries.filter(e=>e.by===tok).map(e=>({id:e.id,kind:e.kind,text:e.text}));
-      if(S.phase==='reveal') v.cards = r.revealOrder.map(id=>r.entries.find(e=>e.id===id)).filter(Boolean)
+      if(S.phase!=='writing') v.cards = cardsOf(S.cur)
         .map(e=>({id:e.id,kind:e.kind,text:e.text,likes:e.likes.length,liked:e.likes.includes(tok)}));
     }
+    if(S.phase==='hearts') v.hearts = heartsData();
+    if(S.phase==='king' || S.phase==='end') v.king = kingData();
     if(S.phase==='end' && p){
       const idx = S.order.indexOf(tok);
       if(idx>=0){
@@ -2597,7 +2641,7 @@ function runHost(code){
         push(); break;
       }
       case 'like': {
-        if(!p || S.phase!=='reveal') break;
+        if(!p || (S.phase!=='reveal' && S.phase!=='ifowner')) break;
         const e = round(S.cur).entries.find(e=>e.id===m.id);
         if(!e) break;
         const i = e.likes.indexOf(tok);
@@ -2612,7 +2656,11 @@ function runHost(code){
     start(){ const toks = S.joinOrder.filter(t=>S.players[t]); if(toks.length<2) return; S.order = shuffle(toks); S.phase='board'; S.cur=0; push(); },
     begin(){ S.phase='writing'; push(); },
     reveal(){ const r=round(S.cur); r.revealOrder = shuffle(r.entries.map(e=>e.id)); S.phase='reveal'; push(); },
-    next(){ if(S.cur < S.order.length-1){ S.cur++; S.phase='writing'; } else { S.phase='end'; } push(); },
+    ifowner(){ S.phase='ifowner'; push(); },
+    next(){ if(S.cur < S.order.length-1){ S.cur++; S.phase='writing'; } else { S.phase='review'; } push(); },
+    hearts(){ S.phase='hearts'; push(); },
+    king(){ S.phase='king'; push(); },
+    end(){ S.phase='end'; push(); },
     kick(nick){ const tok = Object.keys(S.players).find(t=>S.players[t].nick===nick); if(!tok || S.phase!=='lobby') return;
       if(!confirm(`'${nick}' 님을 내보낼까요?`)) return;
       delete S.players[tok]; S.joinOrder = S.joinOrder.filter(t=>t!==tok); push(); },
@@ -2626,7 +2674,7 @@ function runHost(code){
     return `<span class="pill"><span class="dot ${status==='on'?'on':status==='warn'?'warn':''}"></span>${lab}${status==='on'?` · 접속 ${online}`:''}</span>`;
   }
   function progress(){
-    return `<div class="progress">${S.order.map((_,i)=>`<i class="${i<S.cur||S.phase==='end'?'done':i===S.cur?'now':''}"></i>`).join('')}</div>`;
+    return `<div class="progress">${S.order.map((_,i)=>`<i class="${i<S.cur||['review','hearts','king','end'].includes(S.phase)?'done':i===S.cur?'now':''}"></i>`).join('')}</div>`;
   }
   function qrSvg(url){ try{ const q = qrcode(0,'M'); q.addData(url); q.make(); return q.createSvgTag({cellSize:4,margin:2,scalable:true}); }catch(e){ return ''; } }
 
@@ -2640,7 +2688,7 @@ function runHost(code){
       body = `<div class="host-grid">
         <div class="card">
           <h2>참가자 초대</h2>
-          <p class="muted small">QR을 찍거나 링크로 들어오면 가명과 어젠더를 적고 원탁에 앉아요.</p>
+          <p class="muted small">QR을 찍거나 링크로 들어오면 가명과 어젠더를 적고 원탁에 앉습니다.</p>
           <div class="row" style="align-items:flex-start;gap:16px">
             <div class="qr">${qrSvg(url)}</div>
             <div><div class="muted small">방 코드</div><div class="code">${code}</div></div>
@@ -2672,16 +2720,26 @@ function runHost(code){
             <button class="btn big mt" data-act="reveal">의견 공개하기</button>
           </div>
         </div></div>`;
-    } else if(S.phase==='reveal'){
-      const r = round(S.cur);
-      const cards = r.revealOrder.map(id=>r.entries.find(e=>e.id===id)).filter(Boolean);
+    } else if(S.phase==='reveal' || S.phase==='ifowner'){
+      const cards = cardsOf(S.cur);
       const last = S.cur===S.order.length-1;
-      body = `<div class="focus"><div class="label">${S.cur+1}번 어젠더 · 의견 ${cards.length}개</div><div class="text">${esc(S.players[S.order[S.cur]]?.agenda)}</div></div>
-        <div class="hint mt">🎙️ 이제 어젠더 주인이 자신을 밝히고, 소감과 얻은 통찰을 나눠 주세요.</div>
-        <div class="cards">${cards.map(e=>`<div class="op"><span><span class="tag ${e.kind}">${KINDS[e.kind]}</span></span><div class="t">${esc(e.text)}</div><div class="foot"><span></span><span class="likes">${e.likes.length?'♥ '+e.likes.length:''}</span></div></div>`).join('') || '<p class="muted">도착한 의견이 없어요.</p>'}</div>
-        <div class="center mt"><button class="btn big" data-act="next">${last?'모임 마무리':'다음 어젠더로'}</button></div>`;
+      const cardList = `<div class="cards">${cards.map(e=>cardHtml({...e,likes:e.likes.length},false)).join('') || '<p class="muted">도착한 의견이 없어요.</p>'}</div>`;
+      const focus = `<div class="focus"><div class="label">${S.cur+1}번 어젠더 · 의견 ${cards.length}개</div><div class="text">${esc(S.players[S.order[S.cur]]?.agenda)}</div></div>`;
+      body = S.phase==='reveal'
+        ? `${focus}${cardList}<div class="center mt"><button class="btn big" data-act="ifowner">${IFOWNER}</button></div>`
+        : `${focus}<div class="ifowner"><div class="big">${IFOWNER}</div></div>${cardList}
+           <div class="center mt"><button class="btn big" data-act="next">${last?'어젠더 다시 보기':'다음 어젠더로'}</button></div>`;
+    } else if(S.phase==='review'){
+      body = `<div class="card"><h2>오늘 함께 다룬 어젠더 ${S.order.length}개</h2>
+        ${agendaList(-1)}
+        <div class="center mt"><button class="btn big" data-act="hearts">공감 받은 의견 보기</button></div></div>`;
+    } else if(S.phase==='hearts'){
+      body = `<div class="card">${heartsHtml(heartsData())}
+        <div class="center mt"><button class="btn big" data-act="king">오늘의 공감왕 발표</button></div></div>`;
+    } else if(S.phase==='king'){
+      body = `${kingHtml(kingData())}<div class="center mt"><button class="btn big" data-act="end">모임 마무리</button></div>`;
     } else if(S.phase==='end'){
-      body = `<div class="card center"><h1>모든 어젠더를 마쳤어요</h1>
+      body = `<div class="card center"><h1>모임을 마칩니다</h1>
         <p class="muted">참가자들은 각자 화면에서 <b>자기 어젠더에 달린 의견</b>을 내려받을 수 있어요.<br>모두 받았는지 확인한 뒤 모임을 닫아 주세요.</p>
         ${roundTable(ns,null,false)}
         <button class="btn big ghost" data-act="finish">모임 닫고 기록 지우기</button></div>`;
@@ -2696,7 +2754,6 @@ function runHost(code){
     if(b.dataset.kick) return act.kick(b.dataset.kick);
     const a = b.dataset.act;
     if(a==='copy'){ navigator.clipboard?.writeText(joinUrl(code)).then(()=>toast('링크를 복사했어요'),()=>toast('복사에 실패했어요')); return; }
-    if(a==='next' && S.cur===S.order.length-1 && !confirm('마지막 어젠더예요. 모임을 마무리할까요?')) return;
     act[a] && act[a]();
   });
   render();
@@ -2738,7 +2795,7 @@ function runPlayer(code){
       if(V.phase!=='lobby'){ body = `<div class="card"><h2>이미 시작된 모임이에요</h2><p class="muted">새로 입장할 수 없어요. 진행자에게 알려 주세요.</p></div>`; }
       else body = `<div class="card">
         <h1>원탁에 앉기</h1>
-        <p class="muted small">누가 누구인지, 어떤 어젠더가 누구 것인지 끝까지 공개되지 않아요. 내 차례가 오면 그때 원하는 만큼 나를 열면 돼요.</p>
+        <p class="muted small">누가 누구인지, 어떤 어젠더가 누구 것인지 끝까지 공개되지 않아요.</p>
         <label for="nick">가명</label>
         <input type="text" id="nick" maxlength="${MAX_NICK}" placeholder="예: 새벽산책" value="${esc(joinDraft.nick)}" autocomplete="off">
         <label for="agenda">이번 모임에서 다루고 싶은 어젠더</label>
@@ -2761,10 +2818,16 @@ function runPlayer(code){
           ${V.mine.length?`<p class="small muted mt">내가 보낸 의견 ${V.mine.length}개 (공개 전까지 지울 수 있어요)</p><ul class="mine">${V.mine.map(e=>`<li><span class="tag ${e.kind}">${KINDS[e.kind]}</span><span class="t">${esc(e.text)}</span><button data-del="${esc(e.id)}">지우기</button></li>`).join('')}</ul>`:''}
           <p class="small muted mt center">지금까지 모인 의견 ${V.count}개</p>
         </div>`;
-    } else if(V.phase==='reveal'){
+    } else if(V.phase==='reveal' || V.phase==='ifowner'){
       body = `<div class="focus"><div class="label">${V.cur+1}번 어젠더 · 의견 ${V.cards.length}개</div><div class="text">${esc(V.agendas[V.cur])}</div></div>
-        <div class="hint mt">🎙️ 어젠더 주인의 이야기를 들어 보세요. 마음에 닿은 의견에 공감을 눌러 주세요.</div>
-        <div class="cards">${V.cards.map(e=>`<div class="op"><span><span class="tag ${e.kind}">${KINDS[e.kind]}</span></span><div class="t">${esc(e.text)}</div><div class="foot"><span></span><button class="like" data-like="${esc(e.id)}" aria-pressed="${e.liked}">♥ 공감 ${e.likes||''}</button></div></div>`).join('') || '<p class="muted">도착한 의견이 없어요.</p>'}</div>`;
+        ${V.phase==='ifowner'?`<div class="ifowner"><div class="big">${IFOWNER}</div></div>`:`<p class="small muted mt">마음에 닿은 의견에 공감을 눌러 주세요.</p>`}
+        <div class="cards">${V.cards.map(e=>cardHtml(e,true)).join('') || '<p class="muted">도착한 의견이 없어요.</p>'}</div>`;
+    } else if(V.phase==='review'){
+      body = `<div class="card"><h2>오늘 함께 다룬 어젠더 ${V.agendas.length}개</h2>${list(-1)}</div>`;
+    } else if(V.phase==='hearts'){
+      body = `<div class="card">${heartsHtml(V.hearts)}</div>`;
+    } else if(V.phase==='king'){
+      body = kingHtml(V.king);
     } else if(V.phase==='end'){
       body = `<div class="card center"><h1>함께해 주셔서 고마워요</h1>
         ${V.pack?`<p class="muted">내 어젠더에 모인 의견 ${V.pack.items.length}개를 가져가세요.<br>진행자가 모임을 닫으면 사라지고, 어디에도 저장되지 않아요.</p>
@@ -2819,30 +2882,30 @@ function landing(){
   $app.innerHTML = `<div class="wrap">
     <header class="top"><div class="brand">가면의 원탁<small>익명으로 서로의 어젠더를 비추는 시간</small></div></header>
     <div class="card">
-      <h1>모두가 가면을 쓰고 원탁에 앉아요</h1>
-      <p class="muted">각자 가명과 어젠더를 적고, 누구의 고민인지 모르는 채로 생각·조언·질문을 나눠요. 의견이 모이면 어젠더 주인이 스스로를 밝히고 얻은 통찰을 이야기합니다.</p>
+      <h1>모두가 가면을 쓰고 원탁에 앉습니다</h1>
+      <p class="muted">각자 가명과 어젠더를 적고, 누구의 고민인지 모르는 채로 생각·조언·질문을 나눠요. 어젠더 주인은 끝까지 비밀로 남아요.</p>
       <button class="btn block big mt" id="mk">진행자로 모임 만들기</button>
       ${saved.length?`<div class="mt">${saved.map(c=>`<button class="btn block ghost mt" data-resume="${esc(c)}">진행 중인 모임 이어가기 · ${esc(c)}</button>`).join('')}</div>`:''}
     </div>
     <div class="card">
       <h2>참가자로 들어가기</h2>
       <label for="rc">방 코드</label>
-      <div class="row"><input type="text" id="rc" maxlength="4" placeholder="ABCD" style="flex:1;text-transform:uppercase;letter-spacing:.2em;font-weight:700"><button class="btn" id="go">입장</button></div>
+      <div class="row"><input type="text" id="rc" maxlength="4" inputmode="numeric" pattern="[0-9]*" placeholder="1234" style="flex:1;letter-spacing:.2em;font-weight:700"><button class="btn" id="go">입장</button></div>
     </div>
     ${DEMO?'<p class="small muted center mt">데모 모드: 같은 브라우저의 여러 탭으로 진행자·참가자를 흉내 낼 수 있어요.</p>':''}
   </div>`;
   const q = DEMO ? '&demo' : '';
   document.getElementById('mk').onclick = ()=>{ location.href = baseUrl()+'?host='+makeCode()+q; };
-  document.getElementById('go').onclick = ()=>{ const c=document.getElementById('rc').value.trim().toUpperCase(); if(c.length===4) location.href = baseUrl()+'?room='+c+q; };
+  document.getElementById('go').onclick = ()=>{ const c=document.getElementById('rc').value.trim(); if(CODE_RE.test(c)) location.href = baseUrl()+'?room='+c+q; };
   $app.querySelectorAll('[data-resume]').forEach(b=>b.onclick=()=>{ location.href = baseUrl()+'?host='+b.dataset.resume+q; });
 }
 
 /* ===================== 시작 ===================== */
 (function boot(){
-  const host = (params.get('host')||'').toUpperCase(), room = (params.get('room')||'').toUpperCase();
+  const host = (params.get('host')||'').trim(), room = (params.get('room')||'').trim();
   if(!DEMO && typeof Peer==='undefined'){ $app.innerHTML = '<div class="wrap"><div class="card"><h2>연결 모듈을 불러오지 못했어요</h2><p class="muted">인터넷 연결을 확인한 뒤 새로고침해 주세요.</p></div></div>'; return; }
-  if(/^[A-Z0-9]{4}$/.test(host)) runHost(host);
-  else if(/^[A-Z0-9]{4}$/.test(room)) runPlayer(room);
+  if(CODE_RE.test(host)) runHost(host);
+  else if(CODE_RE.test(room)) runPlayer(room);
   else landing();
 })();
 </script>
