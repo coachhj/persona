@@ -2679,7 +2679,25 @@ function runHost(code){
   const act = {
     start(){ const toks = S.joinOrder.filter(t=>S.players[t]); if(toks.length<2) return; S.order = shuffle(toks); S.phase='board'; S.cur=0; push(); },
     begin(){ S.phase='writing'; push(); },
-    reveal(){ const r=round(S.cur); r.revealOrder = shuffle(r.entries.map(e=>e.id)); S.phase='reveal'; push(); },
+    reveal(){ const r=round(S.cur); const ids = r.entries.map(e=>e.id);
+      // 이전으로 돌아왔다 다시 공개해도 기존 카드 순서는 유지, 새 의견만 섞어서 뒤에 붙임
+      const kept = (r.revealOrder||[]).filter(id=>ids.includes(id));
+      r.revealOrder = kept.concat(shuffle(ids.filter(id=>!kept.includes(id)))); S.phase='reveal'; push(); },
+    back(){
+      const last = S.order.length-1;
+      const prev = {
+        board: ()=>{ S.phase='lobby'; },
+        writing: ()=>{ if(S.cur>0){ S.cur--; S.phase='ifowner'; } else S.phase='board'; },
+        reveal: ()=>{ S.phase='writing'; },
+        ifowner: ()=>{ S.phase='reveal'; },
+        review: ()=>{ S.cur=last; S.phase='ifowner'; },
+        hearts: ()=>{ S.phase='review'; },
+        king: ()=>{ S.phase='hearts'; },
+        reflect: ()=>{ S.phase='king'; },
+        end: ()=>{ S.phase='reflect'; S.rsel=-1; },
+      }[S.phase];
+      if(prev){ prev(); push(); }
+    },
     ifowner(){ S.phase='ifowner'; push(); },
     next(){ if(S.cur < S.order.length-1){ S.cur++; S.phase='writing'; } else { S.phase='review'; } push(); },
     hearts(){ S.phase='hearts'; push(); },
@@ -2708,7 +2726,7 @@ function runHost(code){
   function render(){
     if(!S) return;
     const url = joinUrl(code);
-    const head = `<header class="top"><div class="brand">가면의 원탁<small>진행자 화면 · 방 코드 ${code}</small></div>${statusPill()}</header>`;
+    const head = `<header class="top"><div class="brand">가면의 원탁<small>진행자 화면 · 방 코드 ${code}</small></div><div class="row" style="gap:8px">${S.phase!=='lobby'?'<button class="btn quiet" data-act="back" style="padding:8px 14px;font-size:14px">← 이전</button>':''}${statusPill()}</div></header>`;
     let body = '';
     const ns = nicks();
     if(S.phase==='lobby'){
