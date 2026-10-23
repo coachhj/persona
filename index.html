@@ -107,6 +107,7 @@ textarea{resize:vertical;min-height:96px}
 .king .names{font-size:36px;font-weight:800;letter-spacing:-.02em;margin-top:6px}
 .wide .king .names{font-size:56px}
 .king .cnt{opacity:.85;margin-top:4px}
+.like-note{color:var(--heart);font-weight:700;font-size:18px;margin:4px 0 12px}
 .counter{font-size:64px;font-weight:800;line-height:1;color:var(--accent)}
 .host-grid{display:grid;grid-template-columns:1fr;gap:16px}
 @media(min-width:900px){.host-grid{grid-template-columns:360px 1fr}}
@@ -2726,9 +2727,9 @@ function runHost(code){
       const cardList = `<div class="cards">${cards.map(e=>cardHtml({...e,likes:e.likes.length},false)).join('') || '<p class="muted">도착한 의견이 없어요.</p>'}</div>`;
       const focus = `<div class="focus"><div class="label">${S.cur+1}번 어젠더 · 의견 ${cards.length}개</div><div class="text">${esc(S.players[S.order[S.cur]]?.agenda)}</div></div>`;
       body = S.phase==='reveal'
-        ? `${focus}${cardList}<div class="center mt"><button class="btn big" data-act="ifowner">${IFOWNER}</button></div>`
+        ? `${focus}${cardList}<div class="center mt"><p class="like-note">♥ 마음에 드는 의견에 공감을 눌러주세요.</p><button class="btn big" data-act="ifowner">${IFOWNER}</button></div>`
         : `${focus}<div class="ifowner"><div class="big">${IFOWNER}</div></div>${cardList}
-           <div class="center mt"><button class="btn big" data-act="next">${last?'어젠더 다시 보기':'다음 어젠더로'}</button></div>`;
+           <div class="center mt"><p class="like-note">♥ 마음에 드는 의견에 공감을 눌러주세요.</p><button class="btn big" data-act="next">${last?'어젠더 다시 보기':'다음 어젠더로'}</button></div>`;
     } else if(S.phase==='review'){
       body = `<div class="card"><h2>오늘 함께 다룬 어젠더 ${S.order.length}개</h2>
         ${agendaList(-1)}
