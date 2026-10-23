@@ -2451,6 +2451,7 @@ function shuffle(arr){ const a = arr.slice(); for(let i=a.length-1;i>0;i--){ con
 function makeCode(){ const r=new Uint32Array(1); crypto.getRandomValues(r); return String(1000 + r[0]%9000); }
 const CODE_RE = /^[0-9]{4}$/;
 const IFOWNER = '내가 어젠더 주인이라면…';
+const REFLECT = '내가 얻은 성찰';
 
 function cardHtml(e, likeBtn){
   const foot = likeBtn
@@ -2661,6 +2662,7 @@ function runHost(code){
     next(){ if(S.cur < S.order.length-1){ S.cur++; S.phase='writing'; } else { S.phase='review'; } push(); },
     hearts(){ S.phase='hearts'; push(); },
     king(){ S.phase='king'; push(); },
+    reflect(){ S.phase='reflect'; push(); },
     end(){ S.phase='end'; push(); },
     kick(nick){ const tok = Object.keys(S.players).find(t=>S.players[t].nick===nick); if(!tok || S.phase!=='lobby') return;
       if(!confirm(`'${nick}' 님을 내보낼까요?`)) return;
@@ -2675,7 +2677,7 @@ function runHost(code){
     return `<span class="pill"><span class="dot ${status==='on'?'on':status==='warn'?'warn':''}"></span>${lab}${status==='on'?` · 접속 ${online}`:''}</span>`;
   }
   function progress(){
-    return `<div class="progress">${S.order.map((_,i)=>`<i class="${i<S.cur||['review','hearts','king','end'].includes(S.phase)?'done':i===S.cur?'now':''}"></i>`).join('')}</div>`;
+    return `<div class="progress">${S.order.map((_,i)=>`<i class="${i<S.cur||['review','hearts','king','reflect','end'].includes(S.phase)?'done':i===S.cur?'now':''}"></i>`).join('')}</div>`;
   }
   function qrSvg(url){ try{ const q = qrcode(0,'M'); q.addData(url); q.make(); return q.createSvgTag({cellSize:4,margin:2,scalable:true}); }catch(e){ return ''; } }
 
@@ -2738,7 +2740,10 @@ function runHost(code){
       body = `<div class="card">${heartsHtml(heartsData())}
         <div class="center mt"><button class="btn big" data-act="king">오늘의 공감왕 발표</button></div></div>`;
     } else if(S.phase==='king'){
-      body = `${kingHtml(kingData())}<div class="center mt"><button class="btn big" data-act="end">모임 마무리</button></div>`;
+      body = `${kingHtml(kingData())}<div class="center mt"><button class="btn big" data-act="reflect">${REFLECT}</button></div>`;
+    } else if(S.phase==='reflect'){
+      body = `<div class="ifowner"><div class="big">${REFLECT}</div><div class="sub">한 사람씩 돌아가며 오늘 얻은 성찰을 나눠 주세요.</div></div>
+        <div class="center mt"><button class="btn big" data-act="end">모임 마무리</button></div>`;
     } else if(S.phase==='end'){
       body = `<div class="card center"><h1>모임을 마칩니다</h1>
         <p class="muted">참가자들은 각자 화면에서 <b>자기 어젠더에 달린 의견</b>을 내려받을 수 있어요.<br>모두 받았는지 확인한 뒤 모임을 닫아 주세요.</p>
@@ -2829,6 +2834,8 @@ function runPlayer(code){
       body = `<div class="card">${heartsHtml(V.hearts)}</div>`;
     } else if(V.phase==='king'){
       body = kingHtml(V.king);
+    } else if(V.phase==='reflect'){
+      body = `<div class="ifowner"><div class="big">${REFLECT}</div><div class="sub">한 사람씩 돌아가며 오늘 얻은 성찰을 나눠 주세요.</div></div>`;
     } else if(V.phase==='end'){
       body = `<div class="card center"><h1>함께해 주셔서 고마워요</h1>
         ${V.pack?`<p class="muted">내 어젠더에 모인 의견 ${V.pack.items.length}개를 가져가세요.<br>진행자가 모임을 닫으면 사라지고, 어디에도 저장되지 않아요.</p>
@@ -2845,7 +2852,7 @@ function runPlayer(code){
     const p = V.pack, d = new Date();
     const lines = [`가면의 원탁 — 나의 어젠더 기록`, `${d.getFullYear()}.${d.getMonth()+1}.${d.getDate()} · 가명 ${V.me.nick}`, ``, `■ 나의 어젠더`, p.agenda, ``, `■ 받은 의견 ${p.items.length}개`];
     p.items.forEach((e,i)=>{ lines.push(``, `${i+1}. [${KINDS[e.kind].replace(/^\S+\s/,'')}]${e.likes?` ♥${e.likes}`:''}`, e.text); });
-    lines.push(``, `■ 오늘 내가 얻은 통찰`, ``, ``);
+    lines.push(``, `■ 오늘 내가 얻은 성찰`, ``, ``);
     return lines.join('\n');
   }
 
