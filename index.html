@@ -108,6 +108,15 @@ textarea{resize:vertical;min-height:96px}
 .wide .king .names{font-size:56px}
 .king .cnt{opacity:.85;margin-top:4px}
 .like-note{color:var(--heart);font-weight:700;font-size:18px;margin:4px 0 12px}
+.rf-list{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.rf-row{width:100%;display:flex;align-items:center;gap:14px;text-align:left;background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px 16px;font:inherit;color:inherit}
+button.rf-row{cursor:pointer;transition:border-color .15s,box-shadow .15s}
+button.rf-row:hover{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
+.rf-nick{flex:none;min-width:88px;font-weight:800;color:var(--accent);font-size:17px}
+.card>.row .rf-nick{font-size:24px}
+.rf-ag{flex:1;white-space:pre-wrap;overflow-wrap:anywhere}
+.rf-go{flex:none;color:var(--muted);font-size:22px}
+.wide .rf-row{font-size:19px;padding:18px 20px}.wide .rf-nick{font-size:20px;min-width:120px}
 .counter{font-size:64px;font-weight:800;line-height:1;color:var(--accent)}
 .host-grid{display:grid;grid-template-columns:1fr;gap:16px}
 @media(min-width:900px){.host-grid{grid-template-columns:360px 1fr}}
@@ -2463,6 +2472,20 @@ function heartsHtml(sections){
   return `<h2>주제별 공감 받은 의견</h2>` + sections.map(s=>`<div class="award-sec"><h3><span class="num">${s.no}</span><span>${esc(s.agenda)}</span></h3>
     ${s.items.length?`<div class="cards" style="margin-top:6px">${s.items.map(e=>cardHtml(e,false)).join('')}</div>`:`<p class="muted small">공감을 받은 의견이 없어요.</p>`}</div>`).join('');
 }
+function reflectHtml(rf, isHost){
+  const head = `<div class="ifowner"><div class="big">${REFLECT}</div><div class="sub">오늘 얻은 성찰을 나눠주세요.</div></div>`;
+  const nav = isHost ? `<div class="row mt" style="justify-content:center">${rf.sel>=0?`<button class="btn big quiet" data-act="reflectBack">← 전체 목록</button>`:''}<button class="btn big" data-act="end">모임 마무리</button></div>` : '';
+  if(rf.sel>=0 && rf.detail){
+    const d = rf.detail;
+    return head + `<div class="card mt"><div class="row"><span class="rf-nick">${esc(d.nick)}</span></div>
+      <div class="focus mt"><div class="label">${d.no}번 어젠더</div><div class="text">${esc(d.agenda)}</div></div>
+      <h3 class="mt" style="margin-bottom:0">받은 의견 ${d.items.length}개</h3>
+      <div class="cards">${d.items.map(e=>cardHtml(e,false)).join('') || '<p class="muted">받은 의견이 없어요.</p>'}</div></div>` + nav;
+  }
+  return head + `<div class="card mt"><ul class="rf-list">${rf.list.map((r,i)=>
+      `<li>${isHost?`<button class="rf-row" data-sel="${i}">`:'<div class="rf-row">'}<span class="rf-nick">${esc(r.nick)}</span><span class="rf-ag">${esc(r.agenda)}</span>${isHost?'<span class="rf-go">›</span></button>':'</div>'}</li>`).join('')}</ul>
+      ${isHost?'<p class="small muted center mt">가명을 누르면 그의 어젠더와 받은 의견이 모두의 화면에 나타나요.</p>':''}</div>` + nav;
+}
 function kingHtml(k){
   return k.likes
     ? `<div class="king"><div class="crown">👑</div><div class="title">오늘의 공감왕</div><div class="names">${k.names.map(esc).join(' · ')}</div><div class="cnt">받은 공감 ♥ ${k.likes}</div></div>`
@@ -2574,6 +2597,14 @@ function runHost(code){
     return S.order.map((t,i)=>({ no:i+1, agenda:S.players[t]?.agenda || '',
       items: cardsOf(i).filter(e=>e.likes.length).sort((a,b)=>b.likes.length-a.likes.length).map(e=>({kind:e.kind,text:e.text,likes:e.likes.length})) }));
   }
+  function reflectData(){
+    const sel = typeof S.rsel==='number' ? S.rsel : -1;
+    const list = S.order.map(t=>({nick:S.players[t]?.nick||'(나간 참가자)', agenda:S.players[t]?.agenda||''}));
+    let detail = null;
+    if(sel>=0 && sel<S.order.length){ const t=S.order[sel];
+      detail = { no:sel+1, nick:list[sel].nick, agenda:list[sel].agenda, items: cardsOf(sel).map(e=>({kind:e.kind,text:e.text,likes:e.likes.length})) }; }
+    return { sel: detail?sel:-1, list, detail };
+  }
   function kingData(){
     const tally = {};
     S.order.forEach((_,i)=>round(i).entries.forEach(e=>{ tally[e.by] = (tally[e.by]||0) + e.likes.length; }));
@@ -2595,6 +2626,7 @@ function runHost(code){
     }
     if(S.phase==='hearts') v.hearts = heartsData();
     if(S.phase==='king' || S.phase==='end') v.king = kingData();
+    if(S.phase==='reflect') v.reflect = reflectData();
     if(S.phase==='end' && p){
       const idx = S.order.indexOf(tok);
       if(idx>=0){
@@ -2662,7 +2694,9 @@ function runHost(code){
     next(){ if(S.cur < S.order.length-1){ S.cur++; S.phase='writing'; } else { S.phase='review'; } push(); },
     hearts(){ S.phase='hearts'; push(); },
     king(){ S.phase='king'; push(); },
-    reflect(){ S.phase='reflect'; push(); },
+    reflect(){ S.phase='reflect'; S.rsel=-1; push(); },
+    reflectSel(i){ if(S.phase!=='reflect') return; S.rsel = i; push(); },
+    reflectBack(){ S.rsel=-1; push(); },
     end(){ S.phase='end'; push(); },
     kick(nick){ const tok = Object.keys(S.players).find(t=>S.players[t].nick===nick); if(!tok || S.phase!=='lobby') return;
       if(!confirm(`'${nick}' 님을 내보낼까요?`)) return;
@@ -2742,8 +2776,7 @@ function runHost(code){
     } else if(S.phase==='king'){
       body = `${kingHtml(kingData())}<div class="center mt"><button class="btn big" data-act="reflect">${REFLECT}</button></div>`;
     } else if(S.phase==='reflect'){
-      body = `<div class="ifowner"><div class="big">${REFLECT}</div><div class="sub">한 사람씩 돌아가며 오늘 얻은 성찰을 나눠 주세요.</div></div>
-        <div class="center mt"><button class="btn big" data-act="end">모임 마무리</button></div>`;
+      body = reflectHtml(reflectData(), true);
     } else if(S.phase==='end'){
       body = `<div class="card center"><h1>모임을 마칩니다</h1>
         <p class="muted">참가자들은 각자 화면에서 <b>자기 어젠더에 달린 의견</b>을 내려받을 수 있어요.<br>모두 받았는지 확인한 뒤 모임을 닫아 주세요.</p>
@@ -2756,8 +2789,9 @@ function runHost(code){
     return `<ol class="agenda-list">${S.order.map((t,i)=>`<li class="${now>=0&&i<now?'done':i===now?'now':''}"><span class="num">${i+1}</span><span>${esc(S.players[t]?.agenda)}</span></li>`).join('')}</ol>`;
   }
   $app.addEventListener('click', e=>{
-    const b = e.target.closest('[data-act],[data-kick]'); if(!b) return;
+    const b = e.target.closest('[data-act],[data-kick],[data-sel]'); if(!b) return;
     if(b.dataset.kick) return act.kick(b.dataset.kick);
+    if(b.dataset.sel) return act.reflectSel(+b.dataset.sel);
     const a = b.dataset.act;
     if(a==='copy'){ navigator.clipboard?.writeText(joinUrl(code)).then(()=>toast('링크를 복사했어요'),()=>toast('복사에 실패했어요')); return; }
     act[a] && act[a]();
@@ -2835,7 +2869,7 @@ function runPlayer(code){
     } else if(V.phase==='king'){
       body = kingHtml(V.king);
     } else if(V.phase==='reflect'){
-      body = `<div class="ifowner"><div class="big">${REFLECT}</div><div class="sub">한 사람씩 돌아가며 오늘 얻은 성찰을 나눠 주세요.</div></div>`;
+      body = reflectHtml(V.reflect, false);
     } else if(V.phase==='end'){
       body = `<div class="card center"><h1>함께해 주셔서 고마워요</h1>
         ${V.pack?`<p class="muted">내 어젠더에 모인 의견 ${V.pack.items.length}개를 가져가세요.<br>진행자가 모임을 닫으면 사라지고, 어디에도 저장되지 않아요.</p>
