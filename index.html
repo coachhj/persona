@@ -2472,8 +2472,10 @@ function heartsHtml(sections){
   return `<h2>주제별 공감 받은 의견</h2>` + sections.map(s=>`<div class="award-sec"><h3><span class="num">${s.no}</span><span>${esc(s.agenda)}</span></h3>
     ${s.items.length?`<div class="cards" style="margin-top:6px">${s.items.map(e=>cardHtml(e,false)).join('')}</div>`:`<p class="muted small">공감을 받은 의견이 없어요.</p>`}</div>`).join('');
 }
-function reflectHtml(rf, isHost){
-  const head = `<div class="ifowner"><div class="big">${REFLECT}</div><div class="sub">오늘 얻은 성찰과 앞으로의 계획을 나눠주세요.</div></div>`;
+function reflectHead(){ return `<div class="ifowner"><div class="big">${REFLECT}</div><div class="sub">오늘 얻은 성찰과 앞으로의 계획을 나눠주세요.</div></div>`; }
+function reflectHtml(rf, isHost){ return reflectHead() + reflectBody(rf, isHost); }
+function reflectBody(rf, isHost){
+  const head = '';
   const nav = isHost ? `<div class="row mt" style="justify-content:center">${rf.sel>=0?`<button class="btn big quiet" data-act="reflectBack">← 전체 목록</button>`:''}<button class="btn big" data-act="end">모임 마무리</button></div>` : '';
   if(rf.sel>=0 && rf.detail){
     const d = rf.detail;
@@ -2634,6 +2636,8 @@ function runHost(code){
         v.pack = { no: idx+1, agenda: p.agenda, items: (r.revealOrder.length? r.revealOrder.map(id=>r.entries.find(e=>e.id===id)).filter(Boolean) : r.entries)
           .map(e=>({kind:e.kind,text:e.text,likes:e.likes.length})) };
       }
+      v.given = S.order.map((t,i)=>({ no:i+1, agenda:S.players[t]?.agenda||'',
+        items: cardsOf(i).filter(e=>e.by===tok).map(e=>({kind:e.kind,text:e.text,likes:e.likes.length})) })).filter(g=>g.items.length);
     }
     return v;
   }
@@ -2805,7 +2809,23 @@ function runPlayer(code){
   const TK = 'tok-'+code;
   let token = store.get(TK, DEMO);
   if(!token){ token = rid(16); store.set(TK, token, DEMO); }
-  let V = null, status='connecting', err='', kind='advice', draft='', joinDraft={nick:'',agenda:''}, sending=false;
+  let V = null, status='connecting', err='', kind='advice', draft='', joinDraft={nick:'',agenda:''}, sending=false, rendered='';
+  const RK = 'refl-'+code;
+  let refl = store.get(RK, DEMO) || {insight:'', plan:''};
+  function reflForm(title){
+    return `<div class="card mt" id="rf-form"><h2>${title}</h2>
+      <p class="small muted">내 휴대폰에만 저장되고, 마지막에 받는 기록 파일에 함께 담겨요. 발표 중에도 계속 고칠 수 있어요.</p>
+      <label for="rfInsight">성찰</label>
+      <textarea id="rfInsight" data-refl="insight" maxlength="3000" placeholder="오늘 성찰하거나 새롭게 본 것">${esc(refl.insight)}</textarea>
+      <label for="rfPlan">계획</label>
+      <textarea id="rfPlan" data-refl="plan" maxlength="3000" placeholder="앞으로 해볼 첫 번째 행동과 언제 할지">${esc(refl.plan)}</textarea>
+      <p class="small muted" id="rfSaved" style="min-height:1.4em;margin-top:6px"></p></div>`;
+  }
+  $app.addEventListener('input', e=>{
+    const k = e.target.dataset && e.target.dataset.refl; if(!k) return;
+    refl[k] = e.target.value; store.set(RK, refl, DEMO);
+    const sv = document.getElementById('rfSaved'); if(sv) sv.textContent = '✓ 자동 저장됨';
+  });
   const tr = clientTransport(code, onMsg, st=>{ status=st; render(); }, ()=>tr.send({t:'hello', token}));
 
   function onMsg(m){
@@ -2821,6 +2841,12 @@ function runPlayer(code){
   }
 
   function render(){
+    // 성찰·계획 작성 중에는 입력칸을 다시 그리지 않고 나머지만 갱신
+    if(V && (V.phase==='reflect'||V.phase==='end') && rendered===V.phase && document.getElementById('rf-form')){
+      const pill = $app.querySelector('header.top .pill'); if(pill) pill.outerHTML = statusPill();
+      const live = document.getElementById('rf-live'); if(live && V.phase==='reflect') live.innerHTML = reflectBody(V.reflect, false);
+      return;
+    }
     // 입력 중인 값 보존
     const ta = document.getElementById('entryText'); const focused = document.activeElement && document.activeElement.id;
     if(ta) draft = ta.value;
@@ -2869,24 +2895,29 @@ function runPlayer(code){
     } else if(V.phase==='king'){
       body = kingHtml(V.king);
     } else if(V.phase==='reflect'){
-      body = reflectHtml(V.reflect, false);
+      body = reflectHead() + reflForm('나의 성찰과 계획') + `<div id="rf-live">${reflectBody(V.reflect, false)}</div>`;
     } else if(V.phase==='end'){
       body = `<div class="card center"><h1>함께해 주셔서 고마워요</h1>
-        ${V.pack?`<p class="muted">내 어젠더에 모인 의견 ${V.pack.items.length}개를 가져가세요.<br>진행자가 모임을 닫으면 사라지고, 어디에도 저장되지 않아요.</p>
+        ${V.pack?`<p class="muted">내 어젠더와 받은 의견, 내가 남긴 의견, 성찰과 계획을 한 파일로 가져가세요.<br>진행자가 모임을 닫으면 사라지고, 어디에도 저장되지 않아요.</p>
           <div class="row" style="justify-content:center"><button class="btn big" data-act="download">파일로 받기</button><button class="btn big quiet" data-act="copy">복사하기</button></div>`
           :`<p class="muted">모든 어젠더를 마쳤어요.</p>`}
-        </div>`;
+        </div>${V.pack?reflForm('파일에 담길 나의 성찰과 계획'):''}`;
     }
     $app.innerHTML = `<div class="wrap">${head}${body}</div>`;
+    rendered = V ? V.phase : '';
     if(focused){ const el=document.getElementById(focused); if(el){ el.focus(); try{ el.setSelectionRange(el.value.length, el.value.length); }catch(e){} } }
   }
   function list(now){ return `<ol class="agenda-list">${V.agendas.map((a,i)=>`<li class="${i===now?'now':''}"><span class="num">${i+1}</span><span>${esc(a)}</span></li>`).join('')}</ol>`; }
 
   function packText(){
     const p = V.pack, d = new Date();
-    const lines = [`가면의 원탁 — 나의 어젠더 기록`, `${d.getFullYear()}.${d.getMonth()+1}.${d.getDate()} · 가명 ${V.me.nick}`, ``, `■ 나의 어젠더`, p.agenda, ``, `■ 받은 의견 ${p.items.length}개`];
-    p.items.forEach((e,i)=>{ lines.push(``, `${i+1}. [${KINDS[e.kind].replace(/^\S+\s/,'')}]${e.likes?` ♥${e.likes}`:''}`, e.text); });
-    lines.push(``, `■ 오늘 내가 얻은 성찰과 앞으로의 계획`, ``, ``);
+    const kn = k => KINDS[k].replace(/^\S+\s/,'');
+    const lines = [`가면의 원탁 — 나의 기록`, `${d.getFullYear()}.${d.getMonth()+1}.${d.getDate()} · 가명 ${V.me.nick}`, ``, `■ 나의 어젠더`, p.agenda, ``, `■ 받은 의견 ${p.items.length}개`];
+    p.items.forEach((e,i)=>{ lines.push(``, `${i+1}. [${kn(e.kind)}]${e.likes?` ♥${e.likes}`:''}`, e.text); });
+    const given = V.given || [];
+    lines.push(``, ``, `■ 내가 남긴 의견 ${given.reduce((n,g)=>n+g.items.length,0)}개`);
+    given.forEach(g=>{ lines.push(``, `[${g.no}번 어젠더] ${g.agenda}`); g.items.forEach(e=>lines.push(`- [${kn(e.kind)}]${e.likes?` ♥${e.likes}`:''} ${e.text}`)); });
+    lines.push(``, ``, `■ 오늘 성찰하거나 새롭게 본 것`, (refl.insight||'').trim() || '', ``, `■ 앞으로의 계획 (첫 번째 행동과 언제 할지)`, (refl.plan||'').trim() || '', ``);
     return lines.join('\n');
   }
 
