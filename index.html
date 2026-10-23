@@ -2449,7 +2449,6 @@ var qrcode = function() {
 /* ===================== 공통 ===================== */
 const $app = document.getElementById('app');
 const params = new URLSearchParams(location.search);
-const DEMO = params.has('demo');
 const PREFIX = 'prsn-v1-';
 const KINDS = {think:'💭 생각', advice:'💡 조언', question:'❓ 질문'};
 const MAX_NICK = 12, MAX_AGENDA = 300, MAX_ENTRY = 500;
@@ -2500,7 +2499,7 @@ const store = {
   del(k, sess){ try{ (sess?sessionStorage:localStorage).removeItem(PREFIX+k); }catch(e){} }
 };
 function baseUrl(){ return location.origin + location.pathname; }
-function joinUrl(code){ return baseUrl() + '?room=' + code + (DEMO ? '&demo' : ''); }
+function joinUrl(code){ return baseUrl() + '?room=' + code; }
 
 function roundTable(nicks, meNick, removable){
   const n = nicks.length;
@@ -2518,12 +2517,6 @@ function roundTable(nicks, meNick, removable){
 // 서버에는 아무것도 저장하지 않음 (PeerJS 공개 브로커는 연결 중개만 함).
 function hostTransport(code, onMsg, onStatus){
   const conns = new Map(); // connId -> {send}
-  if(DEMO){
-    const bc = new BroadcastChannel(PREFIX+'demo-'+code);
-    bc.onmessage = e => { const d=e.data; if(d.to==='host'){ if(!conns.has(d.from)) conns.set(d.from,{send:m=>bc.postMessage({to:d.from,msg:m})}); onMsg(d.from, d.msg); } };
-    setTimeout(()=>onStatus('on'),0);
-    return { send(id,m){ const c=conns.get(id); if(c) c.send(m); }, ids:()=>[...conns.keys()], drop(id){ conns.delete(id); } };
-  }
   let peer, n=0;
   function start(){
     onStatus('connecting');
@@ -2547,13 +2540,6 @@ function hostTransport(code, onMsg, onStatus){
 }
 
 function clientTransport(code, onMsg, onStatus, onOpen){
-  if(DEMO){
-    const me = 'd'+rid(8);
-    const bc = new BroadcastChannel(PREFIX+'demo-'+code);
-    bc.onmessage = e => { if(e.data.to===me) onMsg(e.data.msg); };
-    setTimeout(()=>{ onStatus('on'); onOpen(); },0);
-    return { send(m){ bc.postMessage({to:'host',from:me,msg:m}); } };
-  }
   let peer, conn, open=false, timer=null;
   function connect(){
     if(!peer || peer.destroyed){ makePeer(); return; }
@@ -2651,7 +2637,7 @@ function runHost(code){
     connTok.set(cid, tok);
     const p = S.players[tok];
     switch(m.t){
-      case 'hello': reply(cid,{t:'state',s:viewFor(tok)}); break;
+      case 'hello': reply(cid,{t:'state',s:viewFor(tok)}); render(); break;
       case 'join': {
         if(p){ reply(cid,{t:'state',s:viewFor(tok)}); break; }
         if(S.phase!=='lobby'){ reply(cid,{t:'error',msg:'이미 게임이 시작되어 새로 입장할 수 없어요. 진행자에게 알려 주세요.'}); break; }
@@ -2706,7 +2692,7 @@ function runHost(code){
       if(!confirm(`'${nick}' 님을 내보낼까요?`)) return;
       delete S.players[tok]; S.joinOrder = S.joinOrder.filter(t=>t!==tok); push(); },
     finish(){ if(!confirm('모임을 닫고 이 기기에 남은 기록을 모두 지울까요?\n참가자들이 자료를 내려받았는지 먼저 확인해 주세요.')) return;
-      store.del(KEY); S = null; location.href = baseUrl() + (DEMO?'?demo':''); }
+      store.del(KEY); S = null; location.href = baseUrl(); }
   };
 
   function statusPill(){
@@ -2807,11 +2793,11 @@ function runHost(code){
 /* ===================== 참가자 ===================== */
 function runPlayer(code){
   const TK = 'tok-'+code;
-  let token = store.get(TK, DEMO);
-  if(!token){ token = rid(16); store.set(TK, token, DEMO); }
+  let token = store.get(TK);
+  if(!token){ token = rid(16); store.set(TK, token); }
   let V = null, status='connecting', err='', kind='advice', draft='', joinDraft={nick:'',agenda:''}, sending=false, rendered='';
   const RK = 'refl-'+code;
-  let refl = store.get(RK, DEMO) || {insight:'', plan:''};
+  let refl = store.get(RK) || {insight:'', plan:''};
   function reflForm(title){
     return `<div class="card mt" id="rf-form"><h2>${title}</h2>
       <p class="small muted">내 휴대폰에만 저장되고, 마지막에 받는 기록 파일에 함께 담겨요. 발표 중에도 계속 고칠 수 있어요.</p>
@@ -2823,11 +2809,13 @@ function runPlayer(code){
   }
   $app.addEventListener('input', e=>{
     const k = e.target.dataset && e.target.dataset.refl; if(!k) return;
-    refl[k] = e.target.value; store.set(RK, refl, DEMO);
+    refl[k] = e.target.value; store.set(RK, refl);
     const sv = document.getElementById('rfSaved'); if(sv) sv.textContent = '✓ 자동 저장됨';
   });
   const tr = clientTransport(code, onMsg, st=>{ status=st; render(); }, ()=>tr.send({t:'hello', token}));
 
+  // 진행자가 늦게 열리거나 새로고침되어도 다시 연결되도록
+  setInterval(()=>{ if(!V) tr.send({t:'hello', token}); }, 2000);
   function onMsg(m){
     if(m.t==='state'){ const prevPhase = V&&V.phase, prevCur = V&&V.cur; V = m.s; err=''; sending=false;
       if(prevPhase!==V.phase || prevCur!==V.cur) { if(V.phase==='writing' && (prevCur!==V.cur)) draft=''; window.scrollTo(0,0); }
@@ -2965,18 +2953,16 @@ function landing(){
       <label for="rc">방 코드</label>
       <div class="row"><input type="text" id="rc" maxlength="4" inputmode="numeric" pattern="[0-9]*" placeholder="1234" style="flex:1;letter-spacing:.2em;font-weight:700"><button class="btn" id="go">입장</button></div>
     </div>
-    ${DEMO?'<p class="small muted center mt">데모 모드: 같은 브라우저의 여러 탭으로 진행자·참가자를 흉내 낼 수 있어요.</p>':''}
   </div>`;
-  const q = DEMO ? '&demo' : '';
-  document.getElementById('mk').onclick = ()=>{ location.href = baseUrl()+'?host='+makeCode()+q; };
-  document.getElementById('go').onclick = ()=>{ const c=document.getElementById('rc').value.trim(); if(CODE_RE.test(c)) location.href = baseUrl()+'?room='+c+q; };
-  $app.querySelectorAll('[data-resume]').forEach(b=>b.onclick=()=>{ location.href = baseUrl()+'?host='+b.dataset.resume+q; });
+  document.getElementById('mk').onclick = ()=>{ location.href = baseUrl()+'?host='+makeCode(); };
+  document.getElementById('go').onclick = ()=>{ const c=document.getElementById('rc').value.trim(); if(CODE_RE.test(c)) location.href = baseUrl()+'?room='+c; };
+  $app.querySelectorAll('[data-resume]').forEach(b=>b.onclick=()=>{ location.href = baseUrl()+'?host='+b.dataset.resume; });
 }
 
 /* ===================== 시작 ===================== */
 (function boot(){
   const host = (params.get('host')||'').trim(), room = (params.get('room')||'').trim();
-  if(!DEMO && typeof Peer==='undefined'){ $app.innerHTML = '<div class="wrap"><div class="card"><h2>연결 모듈을 불러오지 못했어요</h2><p class="muted">인터넷 연결을 확인한 뒤 새로고침해 주세요.</p></div></div>'; return; }
+  if(typeof Peer==='undefined'){ $app.innerHTML = '<div class="wrap"><div class="card"><h2>연결 모듈을 불러오지 못했어요</h2><p class="muted">인터넷 연결을 확인한 뒤 새로고침해 주세요.</p></div></div>'; return; }
   if(CODE_RE.test(host)) runHost(host);
   else if(CODE_RE.test(room)) runPlayer(room);
   else landing();
