@@ -2540,12 +2540,14 @@ function hostTransport(code, onMsg, onStatus){
 }
 
 function clientTransport(code, onMsg, onStatus, onOpen){
-  let peer, conn, open=false, timer=null;
+  let peer, conn, open=false, timer=null, openTimer=null;
   function connect(){
     if(!peer || peer.destroyed){ makePeer(); return; }
     if(peer.disconnected){ try{ peer.reconnect(); }catch(e){} return; }
     try{ conn && conn.close(); }catch(e){}
     conn = peer.connect(PREFIX+code, {reliable:true});
+    // 응답 없이 연결이 매달려 있으면 8초 뒤 다시 시도
+    clearTimeout(openTimer); openTimer = setTimeout(()=>{ if(!open) connect(); }, 8000);
     conn.on('open', ()=>{ open=true; onStatus('on'); onOpen(); });
     conn.on('data', d=>onMsg(d));
     conn.on('close', ()=>{ open=false; onStatus('connecting'); retry(); });
@@ -2561,7 +2563,12 @@ function clientTransport(code, onMsg, onStatus, onOpen){
   }
   document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible' && !open) connect(); });
   makePeer();
-  return { send(m){ if(open && conn){ try{ conn.send(m); }catch(e){} } } };
+  return {
+    send(m){ if(open && conn){ try{ conn.send(m); }catch(e){} } },
+    isOpen(){ return open; },
+    // 연결이 조용히 끊긴 경우(휴대폰 화면 꺼짐, 앱 전환 등) 새로 연결
+    reset(){ open=false; onStatus('connecting'); try{ conn && conn.close(); }catch(e){} connect(); }
+  };
 }
 
 /* ===================== 진행자 ===================== */
@@ -2572,6 +2579,8 @@ function runHost(code){
   // S.order = [token...]  (어젠더 주인 토큰 — 절대 밖으로 나가지 않음)
   // S.rounds[i] = {entries:[{id, by, kind, text, likes:[token]}], revealOrder:[id]}
   const connTok = new Map(); // connId -> token
+  let lastOnline = -1;
+  function onlineCount(){ let live; try{ live = new Set(tr.ids()); }catch(e){ return 0; } return new Set([...connTok].filter(([c])=>live.has(c)).map(([,t])=>t)).size; }
   let status = 'connecting';
   const save = ()=>store.set(KEY, S);
   window.addEventListener('beforeunload', e=>{ if(S.phase!=='end'){ e.preventDefault(); e.returnValue=''; } });
@@ -2637,7 +2646,7 @@ function runHost(code){
     connTok.set(cid, tok);
     const p = S.players[tok];
     switch(m.t){
-      case 'hello': reply(cid,{t:'state',s:viewFor(tok)}); render(); break;
+      case 'hello': { reply(cid,{t:'state',s:viewFor(tok)}); const n=onlineCount(); if(n!==lastOnline){ lastOnline=n; render(); } break; }
       case 'join': {
         if(p){ reply(cid,{t:'state',s:viewFor(tok)}); break; }
         if(S.phase!=='lobby'){ reply(cid,{t:'error',msg:'이미 게임이 시작되어 새로 입장할 수 없어요. 진행자에게 알려 주세요.'}); break; }
@@ -2710,12 +2719,12 @@ function runHost(code){
       if(!confirm(`'${nick}' 님을 내보낼까요?`)) return;
       delete S.players[tok]; S.joinOrder = S.joinOrder.filter(t=>t!==tok); push(); },
     finish(){ if(!confirm('모임을 닫고 이 기기에 남은 기록을 모두 지울까요?\n참가자들이 자료를 내려받았는지 먼저 확인해 주세요.')) return;
-      store.del(KEY); S = null; location.href = baseUrl(); }
+      store.del(KEY); store.del('own-'+code); S = null; location.href = baseUrl(); }
   };
 
   function statusPill(){
     const lab = {on:'방 열림', connecting:'방 여는 중…', warn:'네트워크 확인 필요'}[status];
-    const online = connTok.size;
+    const online = onlineCount();
     return `<span class="pill"><span class="dot ${status==='on'?'on':status==='warn'?'warn':''}"></span>${lab}${status==='on'?` · 접속 ${online}`:''}</span>`;
   }
   function progress(){
@@ -2739,6 +2748,7 @@ function runHost(code){
             <div><div class="muted small">방 코드</div><div class="code">${code}</div></div>
           </div>
           <div class="linkbox mt">${esc(url)}</div>
+          <p class="small muted mt">참가자에게는 이 참가 링크나 QR을 알려 주세요. 지금 브라우저 주소창의 주소는 진행자 전용이에요.</p>
           <div class="row mt"><button class="btn quiet" data-act="copy">링크 복사</button></div>
           ${location.protocol==='file:'?`<p class="err">지금은 파일로 열려 있어서 다른 사람이 이 링크로 들어올 수 없어요. GitHub Pages 같은 웹 주소에 올려서 사용해 주세요.</p>`:''}
         </div>
@@ -2813,7 +2823,7 @@ function runPlayer(code){
   const TK = 'tok-'+code;
   let token = store.get(TK);
   if(!token){ token = rid(16); store.set(TK, token); }
-  let V = null, status='connecting', err='', kind='advice', draft='', joinDraft={nick:'',agenda:''}, sending=false, rendered='';
+  let V = null, status='connecting', err='', kind='advice', draft='', joinDraft={nick:'',agenda:''}, sending=false, rendered='', renderedCur=-1;
   const RK = 'refl-'+code;
   let refl = store.get(RK) || {insight:'', plan:''};
   function reflForm(title){
@@ -2832,10 +2842,20 @@ function runPlayer(code){
   });
   const tr = clientTransport(code, onMsg, st=>{ status=st; render(); }, ()=>tr.send({t:'hello', token}));
 
-  // 진행자가 늦게 열리거나 새로고침되어도 다시 연결되도록
-  setInterval(()=>{ if(!V) tr.send({t:'hello', token}); }, 2000);
+  // 3초마다 진행자에게 신호를 보내 최신 화면을 받고, 응답이 끊기면 다시 연결
+  let lastMsg = Date.now(), lastState = '';
+  setInterval(()=>{
+    if(tr.isOpen()){
+      tr.send({t:'hello', token});
+      if(Date.now()-lastMsg > 10000){ lastMsg = Date.now(); tr.reset(); }
+    } else lastMsg = Date.now();
+  }, 3000);
+  document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible') tr.send({t:'hello', token}); });
   function onMsg(m){
-    if(m.t==='state'){ const prevPhase = V&&V.phase, prevCur = V&&V.cur; V = m.s; err=''; sending=false;
+    lastMsg = Date.now();
+    const wasOff = status!=='on'; status='on';
+    if(m.t==='state'){ const js = JSON.stringify(m.s); if(js===lastState && !sending && !err && !wasOff){ return; } lastState = js;
+      const prevPhase = V&&V.phase, prevCur = V&&V.cur; V = m.s; err=''; sending=false;
       if(prevPhase!==V.phase || prevCur!==V.cur) { if(V.phase==='writing' && (prevCur!==V.cur)) draft=''; window.scrollTo(0,0); }
       render(); }
     else if(m.t==='error'){ err = m.msg; sending=false; render(); }
@@ -2847,6 +2867,19 @@ function runPlayer(code){
   }
 
   function render(){
+    // 글을 쓰는 중에는 입력칸을 다시 그리지 않음 (한글 입력이 끊기지 않도록)
+    if(V && !V.joined && V.phase==='lobby' && rendered==='join' && document.getElementById('nick')){
+      const pill = $app.querySelector('header.top .pill'); if(pill) pill.outerHTML = statusPill();
+      const jb = $app.querySelector('[data-act=join]'); if(jb) jb.disabled = (status!=='on'||sending);
+      const er = $app.querySelector('.err'); if(er) er.textContent = err;
+      return;
+    }
+    if(V && V.phase==='writing' && rendered==='writing' && renderedCur===V.cur && document.getElementById('entryText')){
+      const pill = $app.querySelector('header.top .pill'); if(pill) pill.outerHTML = statusPill();
+      const sb = $app.querySelector('[data-act=send]'); if(sb) sb.disabled = (status!=='on');
+      const live = document.getElementById('w-live'); if(live) live.innerHTML = writingLive();
+      return;
+    }
     // 성찰·계획 작성 중에는 입력칸을 다시 그리지 않고 나머지만 갱신
     if(V && (V.phase==='reflect'||V.phase==='end') && rendered===V.phase && document.getElementById('rf-form')){
       const pill = $app.querySelector('header.top .pill'); if(pill) pill.outerHTML = statusPill();
@@ -2887,8 +2920,7 @@ function runPlayer(code){
           <div class="kinds">${Object.entries(KINDS).map(([k,l])=>`<button class="kind ${k}" data-kind="${k}" aria-pressed="${kind===k}">${l}</button>`).join('')}</div>
           <textarea id="entryText" maxlength="${MAX_ENTRY}" placeholder="${kind==='question'?'이 어젠더의 주인에게 묻고 싶은 질문':kind==='advice'?'건네고 싶은 조언':'떠오르는 생각이나 느낌'}">${esc(draft)}</textarea>
           <button class="btn block mt" data-act="send" ${status!=='on'?'disabled':''}>보내기</button>
-          ${V.mine.length?`<p class="small muted mt">내가 보낸 의견 ${V.mine.length}개 (공개 전까지 지울 수 있어요)</p><ul class="mine">${V.mine.map(e=>`<li><span class="tag ${e.kind}">${KINDS[e.kind]}</span><span class="t">${esc(e.text)}</span><button data-del="${esc(e.id)}">지우기</button></li>`).join('')}</ul>`:''}
-          <p class="small muted mt center">지금까지 모인 의견 ${V.count}개</p>
+          <div id="w-live">${writingLive()}</div>
         </div>`;
     } else if(V.phase==='reveal' || V.phase==='ifowner'){
       body = `<div class="focus"><div class="label">${V.cur+1}번 어젠더 · 의견 ${V.cards.length}개</div><div class="text">${esc(V.agendas[V.cur])}</div></div>
@@ -2910,8 +2942,12 @@ function runPlayer(code){
         </div>${V.pack?reflForm('파일에 담길 나의 성찰과 계획'):''}`;
     }
     $app.innerHTML = `<div class="wrap">${head}${body}</div>`;
-    rendered = V ? V.phase : '';
+    rendered = !V ? '' : (!V.joined && V.phase==='lobby') ? 'join' : V.phase; renderedCur = V ? V.cur : -1;
     if(focused){ const el=document.getElementById(focused); if(el){ el.focus(); try{ el.setSelectionRange(el.value.length, el.value.length); }catch(e){} } }
+  }
+  function writingLive(){
+    return `${V.mine.length?`<p class="small muted mt">내가 보낸 의견 ${V.mine.length}개 (공개 전까지 지울 수 있어요)</p><ul class="mine">${V.mine.map(e=>`<li><span class="tag ${e.kind}">${KINDS[e.kind]}</span><span class="t">${esc(e.text)}</span><button data-del="${esc(e.id)}">지우기</button></li>`).join('')}</ul>`:''}
+          <p class="small muted mt center">지금까지 모인 의견 ${V.count}개</p>`;
   }
   function list(now){ return `<ol class="agenda-list">${V.agendas.map((a,i)=>`<li class="${i===now?'now':''}"><span class="num">${i+1}</span><span>${esc(a)}</span></li>`).join('')}</ol>`; }
 
@@ -2972,7 +3008,7 @@ function landing(){
       <div class="row"><input type="text" id="rc" maxlength="4" inputmode="numeric" pattern="[0-9]*" placeholder="1234" style="flex:1;letter-spacing:.2em;font-weight:700"><button class="btn" id="go">입장</button></div>
     </div>
   </div>`;
-  document.getElementById('mk').onclick = ()=>{ location.href = baseUrl()+'?host='+makeCode(); };
+  document.getElementById('mk').onclick = ()=>{ const c = makeCode(); store.set('own-'+c, 1); location.href = baseUrl()+'?host='+c; };
   document.getElementById('go').onclick = ()=>{ const c=document.getElementById('rc').value.trim(); if(CODE_RE.test(c)) location.href = baseUrl()+'?room='+c; };
   $app.querySelectorAll('[data-resume]').forEach(b=>b.onclick=()=>{ location.href = baseUrl()+'?host='+b.dataset.resume; });
 }
@@ -2981,7 +3017,8 @@ function landing(){
 (function boot(){
   const host = (params.get('host')||'').trim(), room = (params.get('room')||'').trim();
   if(typeof Peer==='undefined'){ $app.innerHTML = '<div class="wrap"><div class="card"><h2>연결 모듈을 불러오지 못했어요</h2><p class="muted">인터넷 연결을 확인한 뒤 새로고침해 주세요.</p></div></div>'; return; }
-  if(CODE_RE.test(host)) runHost(host);
+  // 진행자 주소가 공유되어도, 그 방을 만든 기기가 아니면 참가자 화면으로 보냄
+  if(CODE_RE.test(host)){ if(store.get('host-'+host) || store.get('own-'+host)) runHost(host); else location.replace(baseUrl()+'?room='+host); }
   else if(CODE_RE.test(room)) runPlayer(room);
   else landing();
 })();
