@@ -117,6 +117,17 @@ button.rf-row:hover{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent
 .rf-ag{flex:1;white-space:pre-wrap;overflow-wrap:anywhere}
 .rf-go{flex:none;color:var(--muted);font-size:22px}
 .wide .rf-row{font-size:19px;padding:18px 20px}.wide .rf-nick{font-size:20px;min-width:120px}
+.wrap.has-qr{padding-bottom:190px}
+.qr-mini{position:fixed;right:16px;bottom:16px;z-index:8;display:flex;flex-direction:column;align-items:center;gap:4px;background:#fff;border:1px solid var(--line);border-radius:14px;padding:8px 8px 6px;box-shadow:var(--shadow);cursor:pointer;font:inherit}
+.qr-mini svg{width:112px;height:112px;display:block}
+.qr-mini span{font-weight:800;font-size:14px;color:var(--accent);letter-spacing:.04em}
+.qr-over{position:fixed;inset:0;z-index:20;background:rgba(43,34,36,.62);display:flex;align-items:center;justify-content:center;padding:16px;cursor:pointer}
+.qr-big{background:#fff;border-radius:24px;padding:28px;text-align:center;max-width:92vw}
+.qr-big svg{width:min(58vh,72vw);height:min(58vh,72vw);display:block;margin:0 auto}
+.wrap.player{padding-bottom:72px}
+.leave-note{position:fixed;left:0;right:0;bottom:0;z-index:7;background:var(--accent-soft);color:var(--accent);font-size:13px;font-weight:600;text-align:center;padding:9px 12px calc(9px + env(safe-area-inset-bottom))}
+.leave-warn{position:fixed;inset:0;z-index:30;background:rgba(43,34,36,.55);display:flex;align-items:center;justify-content:center;padding:16px}
+.leave-warn .card{max-width:420px;width:100%}
 .counter{font-size:64px;font-weight:800;line-height:1;color:var(--accent)}
 .host-grid{display:grid;grid-template-columns:1fr;gap:16px}
 @media(min-width:900px){.host-grid{grid-template-columns:360px 1fr}}
@@ -127,7 +138,7 @@ button.rf-row:hover{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent
 .progress i{flex:1;height:6px;border-radius:3px;background:var(--line)}
 .progress i.done{background:var(--accent)}
 .progress i.now{background:var(--k-question)}
-.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 16px;border-radius:12px;font-size:14px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:9}
+.toast{position:fixed;left:50%;bottom:64px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 16px;border-radius:12px;font-size:14px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:9}
 .toast.show{opacity:1}
 .center{text-align:center}
 .mt{margin-top:14px}
@@ -2579,7 +2590,8 @@ function runHost(code){
   // S.order = [token...]  (어젠더 주인 토큰 — 절대 밖으로 나가지 않음)
   // S.rounds[i] = {entries:[{id, by, kind, text, likes:[token]}], revealOrder:[id]}
   const connTok = new Map(); // connId -> token
-  let lastOnline = -1;
+  let lastOnline = -1, qrOpen = false;
+  const qrCache = {};
   function onlineCount(){ let live; try{ live = new Set(tr.ids()); }catch(e){ return 0; } return new Set([...connTok].filter(([c])=>live.has(c)).map(([,t])=>t)).size; }
   let status = 'connecting';
   const save = ()=>store.set(KEY, S);
@@ -2589,7 +2601,9 @@ function runHost(code){
 
   function round(i){ return S.rounds[i] || (S.rounds[i] = {entries:[], revealOrder:[]}); }
   function nicks(){ return S.joinOrder.filter(t=>S.players[t]).map(t=>S.players[t].nick); }
-  function cardsOf(i){ const r = round(i); return r.revealOrder.length ? r.revealOrder.map(id=>r.entries.find(e=>e.id===id)).filter(Boolean) : r.entries; }
+  // 생각 → 조언 → 질문 순으로 묶고, 같은 종류 안에서는 공개 때 섞은 순서를 유지
+  const KORD = {think:0, advice:1, question:2};
+  function cardsOf(i){ const r = round(i); const base = r.revealOrder.length ? r.revealOrder.map(id=>r.entries.find(e=>e.id===id)).filter(Boolean) : r.entries; return base.slice().sort((a,b)=>(KORD[a.kind]??9)-(KORD[b.kind]??9)); }
   function heartsData(){
     return S.order.map((t,i)=>({ no:i+1, agenda:S.players[t]?.agenda || '',
       items: cardsOf(i).filter(e=>e.likes.length).sort((a,b)=>b.likes.length-a.likes.length).map(e=>({kind:e.kind,text:e.text,likes:e.likes.length})) }));
@@ -2628,7 +2642,7 @@ function runHost(code){
       const idx = S.order.indexOf(tok);
       if(idx>=0){
         const r = round(idx);
-        v.pack = { no: idx+1, agenda: p.agenda, items: (r.revealOrder.length? r.revealOrder.map(id=>r.entries.find(e=>e.id===id)).filter(Boolean) : r.entries)
+        v.pack = { no: idx+1, agenda: p.agenda, items: cardsOf(idx)
           .map(e=>({kind:e.kind,text:e.text,likes:e.likes.length})) };
       }
       v.given = S.order.map((t,i)=>({ no:i+1, agenda:S.players[t]?.agenda||'',
@@ -2641,19 +2655,28 @@ function runHost(code){
 
   function onMsg(cid, m){
     if(!m || typeof m!=='object') return;
-    const tok = typeof m.token==='string' ? m.token.slice(0,40) : null;
-    if(!tok) return;
+    const raw = typeof m.token==='string' ? m.token.slice(0,40) : null;
+    if(!raw) return;
+    const tok = (S.alias && S.alias[raw]) || raw;   // 다른 브라우저로 다시 들어온 사람은 원래 자리로
     connTok.set(cid, tok);
     const p = S.players[tok];
     switch(m.t){
       case 'hello': { reply(cid,{t:'state',s:viewFor(tok)}); const n=onlineCount(); if(n!==lastOnline){ lastOnline=n; render(); } break; }
+      case 'rejoin': {
+        if(p){ reply(cid,{t:'state',s:viewFor(tok)}); break; }
+        const nick = String(m.nick||'').trim().slice(0,MAX_NICK);
+        const found = Object.keys(S.players).find(t=>S.players[t].nick===nick);
+        if(!found){ reply(cid,{t:'error',msg:'그 가명을 찾지 못했어요. 처음 입장할 때 쓴 가명을 똑같이 적어 주세요.'}); break; }
+        S.alias = S.alias || {}; S.alias[raw] = found; connTok.set(cid, found);
+        save(); reply(cid,{t:'state',s:viewFor(found)}); render(); break;
+      }
       case 'join': {
         if(p){ reply(cid,{t:'state',s:viewFor(tok)}); break; }
         if(S.phase!=='lobby'){ reply(cid,{t:'error',msg:'이미 게임이 시작되어 새로 입장할 수 없어요. 진행자에게 알려 주세요.'}); break; }
         const nick = String(m.nick||'').trim().slice(0,MAX_NICK);
         const agenda = String(m.agenda||'').trim().slice(0,MAX_AGENDA);
         if(!nick || !agenda){ reply(cid,{t:'error',msg:'가명과 어젠더를 모두 적어 주세요.'}); break; }
-        if(Object.values(S.players).some(x=>x.nick===nick)){ reply(cid,{t:'error',msg:'이미 쓰고 있는 가명이에요. 다른 가명을 골라 주세요.'}); break; }
+        if(Object.values(S.players).some(x=>x.nick===nick)){ reply(cid,{t:'error',msg:'이미 쓰고 있는 가명이에요. 다른 가명을 골라 주세요. 입장했다가 다시 들어온 거라면 아래 \'다시 들어가기\'를 이용해 주세요.'}); break; }
         S.players[tok] = {nick, agenda}; S.joinOrder.push(tok);
         push(); break;
       }
@@ -2711,6 +2734,7 @@ function runHost(code){
     next(){ if(S.cur < S.order.length-1){ S.cur++; S.phase='writing'; } else { S.phase='review'; } push(); },
     hearts(){ S.phase='hearts'; push(); },
     king(){ S.phase='king'; push(); },
+    qrBig(){ qrOpen = !qrOpen; render(); },
     reflect(){ S.phase='reflect'; S.rsel=-1; push(); },
     reflectSel(i){ if(S.phase!=='reflect') return; S.rsel = i; push(); },
     reflectBack(){ S.rsel=-1; push(); },
@@ -2730,7 +2754,7 @@ function runHost(code){
   function progress(){
     return `<div class="progress">${S.order.map((_,i)=>`<i class="${i<S.cur||['review','hearts','king','reflect','end'].includes(S.phase)?'done':i===S.cur?'now':''}"></i>`).join('')}</div>`;
   }
-  function qrSvg(url){ try{ const q = qrcode(0,'M'); q.addData(url); q.make(); return q.createSvgTag({cellSize:4,margin:2,scalable:true}); }catch(e){ return ''; } }
+  function qrSvg(url){ if(qrCache[url]) return qrCache[url]; try{ const q = qrcode(0,'M'); q.addData(url); q.make(); return (qrCache[url] = q.createSvgTag({cellSize:4,margin:2,scalable:true})); }catch(e){ return ''; } }
 
   function render(){
     if(!S) return;
@@ -2801,7 +2825,13 @@ function runHost(code){
         ${roundTable(ns,null,false)}
         <button class="btn big ghost" data-act="finish">모임 닫고 기록 지우기</button></div>`;
     }
-    $app.innerHTML = `<div class="wrap wide">${head}${body}</div>`;
+    let qrw = '';
+    if(S.phase!=='lobby'){
+      const svg = qrSvg(url);
+      qrw = `<button class="qr-mini" data-act="qrBig" title="눌러서 크게 보기">${svg}<span>방 ${code}</span></button>`
+        + (qrOpen ? `<div class="qr-over" data-act="qrBig"><div class="qr-big">${svg}<div class="code">${code}</div><div class="linkbox mt">${esc(url)}</div><p class="small muted mt">화면을 누르면 닫혀요</p></div></div>` : '');
+    }
+    $app.innerHTML = `<div class="wrap wide ${S.phase!=='lobby'?'has-qr':''}">${head}${body}</div>${qrw}`;
   }
   function agendaList(now){
     return `<ol class="agenda-list">${S.order.map((t,i)=>`<li class="${now>=0&&i<now?'done':i===now?'now':''}"><span class="num">${i+1}</span><span>${esc(S.players[t]?.agenda)}</span></li>`).join('')}</ol>`;
@@ -2823,6 +2853,19 @@ function runPlayer(code){
   const TK = 'tok-'+code;
   let token = store.get(TK);
   if(!token){ token = rid(16); store.set(TK, token); }
+  // 뒤로가기를 눌러도 한 번은 이 페이지에 머물게 하고 경고를 보여줌
+  let armed = false;
+  function arm(){ if(armed) return; try{ history.pushState({stay:1}, '', location.href); armed = true; }catch(e){} }
+  ['pointerdown','keydown','touchstart'].forEach(ev=>window.addEventListener(ev, arm, {capture:true, passive:true}));
+  arm();
+  window.addEventListener('popstate', ()=>{ armed = false; arm(); showLeaveWarn(); });
+  window.addEventListener('beforeunload', e=>{ if(V && V.joined && V.phase!=='end'){ e.preventDefault(); e.returnValue=''; } });
+  function showLeaveWarn(){
+    let w = document.getElementById('leaveWarn');
+    if(!w){ w = document.createElement('div'); w.id='leaveWarn'; w.className='leave-warn';
+      w.innerHTML = '<div class="card center"><h2>잠깐만요!</h2><p>뒤로가기를 누르면 원탁을 떠나게 돼요.<br>이 화면에 그대로 머물러 주세요.</p><button class="btn block mt" id="leaveOk">계속 참여하기</button></div>';
+      document.body.appendChild(w); w.querySelector('#leaveOk').onclick = ()=>w.remove(); }
+  }
   let V = null, status='connecting', err='', kind='think', draft='', joinDraft={nick:'',agenda:''}, sending=false, rendered='', renderedCur=-1;
   const RK = 'refl-'+code;
   let refl = store.get(RK) || {insight:'', plan:''};
@@ -2868,9 +2911,9 @@ function runPlayer(code){
 
   function render(){
     // 글을 쓰는 중에는 입력칸을 다시 그리지 않음 (한글 입력이 끊기지 않도록)
-    if(V && !V.joined && V.phase==='lobby' && rendered==='join' && document.getElementById('nick')){
+    if(V && !V.joined && rendered===(V.phase==='lobby'?'join':'rejoin') && document.getElementById('rejoinNick')){
       const pill = $app.querySelector('header.top .pill'); if(pill) pill.outerHTML = statusPill();
-      const jb = $app.querySelector('[data-act=join]'); if(jb) jb.disabled = (status!=='on'||sending);
+      $app.querySelectorAll('[data-act=join],[data-act=rejoin]').forEach(b=>b.disabled = (status!=='on'||sending));
       const er = $app.querySelector('.err'); if(er) er.textContent = err;
       return;
     }
@@ -2899,7 +2942,9 @@ function runPlayer(code){
     if(!V){
       body = `<div class="card center"><p class="muted">진행자에게 연결하고 있어요…</p><p class="small muted">진행자 화면이 열려 있는지 확인해 주세요.</p></div>`;
     } else if(!V.joined){
-      if(V.phase!=='lobby'){ body = `<div class="card"><h2>이미 시작된 모임이에요</h2><p class="muted">새로 입장할 수 없어요. 진행자에게 알려 주세요.</p></div>`; }
+      if(V.phase!=='lobby'){ body = `<div class="card"><h2>다시 들어가기</h2><p class="muted small">모임이 이미 시작됐어요. 처음 입장할 때 쓴 가명을 적으면 원래 자리로 돌아가요.</p>
+        <label for="rejoinNick">내 가명</label><input type="text" id="rejoinNick" maxlength="${MAX_NICK}" autocomplete="off">
+        <button class="btn block big mt" data-act="rejoin" ${status!=='on'||sending?'disabled':''}>다시 들어가기</button><div class="err">${esc(err)}</div></div>`; }
       else body = `<div class="card">
         <h1>원탁에 앉기</h1>
         <p class="muted small">누가 누구인지, 어떤 어젠더가 누구 것인지 끝까지 공개되지 않아요.</p>
@@ -2909,7 +2954,9 @@ function runPlayer(code){
         <textarea id="agenda" maxlength="${MAX_AGENDA}" placeholder="얻고 싶은 고민 해결이나 이루고 싶은 목표를 적어 주세요">${esc(joinDraft.agenda)}</textarea>
         <p class="small muted">이 내용이 그대로 전체 게시판에 올라가요. 나를 짐작할 수 있는 이름이나 표현은 빼 주세요.</p>
         <button class="btn block big mt" data-act="join" ${status!=='on'||sending?'disabled':''}>입장하기</button>
-        <div class="err">${esc(err)}</div></div>`;
+        <div class="err">${esc(err)}</div></div>
+        <div class="card"><h2>다시 들어가기</h2><p class="muted small">이미 입장했다가 나간 분은 쓰던 가명만 적어 주세요.</p>
+        <div class="row"><input type="text" id="rejoinNick" maxlength="${MAX_NICK}" placeholder="내 가명" autocomplete="off" style="flex:1"><button class="btn quiet" data-act="rejoin" ${status!=='on'||sending?'disabled':''}>다시 들어가기</button></div></div>`;
     } else if(V.phase==='lobby'){
       body = `<div class="card"><h2>원탁에 앉았어요</h2><p class="muted small">모두 모이면 진행자가 어젠더 순서를 정하고 시작해요.</p>${roundTable(V.nicks, V.me.nick, false)}</div>`;
     } else if(V.phase==='board'){
@@ -2943,8 +2990,8 @@ function runPlayer(code){
           :`<p class="muted">모든 어젠더를 마쳤어요.</p>`}
         </div>${V.pack?reflForm('파일에 담길 나의 성찰과 계획'):''}`;
     }
-    $app.innerHTML = `<div class="wrap">${head}${body}</div>`;
-    rendered = !V ? '' : (!V.joined && V.phase==='lobby') ? 'join' : V.phase; renderedCur = V ? V.cur : -1;
+    $app.innerHTML = `<div class="wrap player">${head}${body}</div><div class="leave-note">⚠️ 뒤로가기·창 닫기를 하면 원탁을 떠나요</div>`;
+    rendered = !V ? '' : !V.joined ? (V.phase==='lobby' ? 'join' : 'rejoin') : V.phase; renderedCur = V ? V.cur : -1;
     if(focused){ const el=document.getElementById(focused); if(el){ el.focus(); try{ el.setSelectionRange(el.value.length, el.value.length); }catch(e){} } }
   }
   function kindPlaceholder(){ return kind==='question'?'이 어젠더의 주인에게 묻고 싶은 질문':kind==='advice'?'건네고 싶은 조언':'떠오르는 생각이나 느낌'; }
@@ -2972,6 +3019,12 @@ function runPlayer(code){
     if(b.dataset.del){ tr.send({t:'delEntry', token, id:b.dataset.del}); return; }
     if(b.dataset.like){ tr.send({t:'like', token, id:b.dataset.like}); return; }
     const a = b.dataset.act;
+    if(a==='rejoin'){
+      const nick = document.getElementById('rejoinNick').value.trim();
+      if(!nick){ document.getElementById('rejoinNick').focus(); return; }
+      sending=true; err=''; render(); tr.send({t:'rejoin', token, nick});
+      setTimeout(()=>{ if(sending){ sending=false; render(); } }, 6000);
+    }
     if(a==='join'){
       const nick = document.getElementById('nick').value.trim(), agenda = document.getElementById('agenda').value.trim();
       if(!nick || !agenda){ err='가명과 어젠더를 모두 적어 주세요.'; render(); return; }
