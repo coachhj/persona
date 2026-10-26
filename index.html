@@ -2823,7 +2823,7 @@ function runPlayer(code){
   const TK = 'tok-'+code;
   let token = store.get(TK);
   if(!token){ token = rid(16); store.set(TK, token); }
-  let V = null, status='connecting', err='', kind='advice', draft='', joinDraft={nick:'',agenda:''}, sending=false, rendered='', renderedCur=-1;
+  let V = null, status='connecting', err='', kind='think', draft='', joinDraft={nick:'',agenda:''}, sending=false, rendered='', renderedCur=-1;
   const RK = 'refl-'+code;
   let refl = store.get(RK) || {insight:'', plan:''};
   function reflForm(title){
@@ -2878,6 +2878,8 @@ function runPlayer(code){
       const pill = $app.querySelector('header.top .pill'); if(pill) pill.outerHTML = statusPill();
       const sb = $app.querySelector('[data-act=send]'); if(sb) sb.disabled = (status!=='on');
       const live = document.getElementById('w-live'); if(live) live.innerHTML = writingLive();
+      $app.querySelectorAll('[data-kind]').forEach(b=>b.setAttribute('aria-pressed', String(b.dataset.kind===kind)));
+      const et = document.getElementById('entryText'); if(et) et.placeholder = kindPlaceholder();
       return;
     }
     // 성찰·계획 작성 중에는 입력칸을 다시 그리지 않고 나머지만 갱신
@@ -2918,7 +2920,7 @@ function runPlayer(code){
           <h2>나의 생각 · 조언 · 질문</h2>
           <p class="small muted">이름 없이 전달돼요. 여러 개 보내도 좋아요.</p>
           <div class="kinds">${Object.entries(KINDS).map(([k,l])=>`<button class="kind ${k}" data-kind="${k}" aria-pressed="${kind===k}">${l}</button>`).join('')}</div>
-          <textarea id="entryText" maxlength="${MAX_ENTRY}" placeholder="${kind==='question'?'이 어젠더의 주인에게 묻고 싶은 질문':kind==='advice'?'건네고 싶은 조언':'떠오르는 생각이나 느낌'}">${esc(draft)}</textarea>
+          <textarea id="entryText" maxlength="${MAX_ENTRY}" placeholder="${kindPlaceholder()}">${esc(draft)}</textarea>
           <button class="btn block mt" data-act="send" ${status!=='on'?'disabled':''}>보내기</button>
           <div id="w-live">${writingLive()}</div>
         </div>`;
@@ -2945,6 +2947,7 @@ function runPlayer(code){
     rendered = !V ? '' : (!V.joined && V.phase==='lobby') ? 'join' : V.phase; renderedCur = V ? V.cur : -1;
     if(focused){ const el=document.getElementById(focused); if(el){ el.focus(); try{ el.setSelectionRange(el.value.length, el.value.length); }catch(e){} } }
   }
+  function kindPlaceholder(){ return kind==='question'?'이 어젠더의 주인에게 묻고 싶은 질문':kind==='advice'?'건네고 싶은 조언':'떠오르는 생각이나 느낌'; }
   function writingLive(){
     return `${V.mine.length?`<p class="small muted mt">내가 보낸 의견 ${V.mine.length}개 (공개 전까지 지울 수 있어요)</p><ul class="mine">${V.mine.map(e=>`<li><span class="tag ${e.kind}">${KINDS[e.kind]}</span><span class="t">${esc(e.text)}</span><button data-del="${esc(e.id)}">지우기</button></li>`).join('')}</ul>`:''}
           <p class="small muted mt center">지금까지 모인 의견 ${V.count}개</p>`;
